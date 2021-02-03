@@ -1,7 +1,6 @@
+*.mseed
 old_code
 __pycache__
-setup.py
-STALTA_tests
 script_frs/templates
 script_frs/test_events
 script_frs/deep_events
@@ -11,3 +10,9 @@ script_frs/initial_templates_daily
 script_frs/initial_templates_daily_old
 script_frs/outslurm
 notebooks/.ipynb_checkpoints
+STALTA_tests/bad
+STALTA_tests/good
+STALTA_tests/inslurm
+STALTA_tests/lists
+STALTA_tests/outslurm
+STALTA_tests/waveforms
