@@ -8,7 +8,7 @@ from obspy.core.event.catalog import Catalog
 from obspy.core.event.event import Event
 from obspy.core.event.magnitude import StationMagnitude, Magnitude, StationMagnitudeContribution, Amplitude
 from obspy.core.event.base import QuantityError, TimeWindow, WaveformStreamID, Comment
-from helper_functions import *
+from detector.helper_functions import *
 import time
 import pandas as pd
 import logging
@@ -24,9 +24,11 @@ plt.rcParams["figure.figsize"] = [20, 20]
 DOM_PERIOD = 1 / 50.
 EPS_WINLEN = 1.5 * DOM_PERIOD
 DATA_DIR_ROOT = "/home/gilbert_lab/cami_frs/borehole_data/sac_daily_nez_500Hz/"
+ert_surveys_file = "/home/genevieve.savard/borehole-energy-detector/script_frs/survey_times_ERT.csv"
+OUTPUT_DIR = "/home/genevieve.savard/borehole-energy-detector/script_frs/detections"
+OUTPUT_DIR_WF = "/home/genevieve.savard/borehole-energy-detector/script_frs/detections_waveforms"
 
 # TODO: Rotate to RTZ using highest amplitude across 3 channels before picks, get azimuth at that point?
-
 
 def network_detection(st, cft_return=True):
     # TODO: Dynamic threshold method of Akram 2013
@@ -163,7 +165,6 @@ def main(st, fname, verbose=False):
     buffer2 = 10.0
 
     # Load ERT data
-    ert_surveys_file = "survey_times_ERT.csv"
     dateparse = lambda x: pd.datetime.strptime(x, '%Y-%m-%d %H:%M:%S')
     ert_surveys = pd.read_csv(ert_surveys_file, parse_dates=["time_local_start"], date_parser=dateparse)
     ert_surveys["time_local_start"] = ert_surveys["time_local_start"].dt.tz_localize("America/Edmonton",
@@ -371,10 +372,10 @@ def main(st, fname, verbose=False):
                 Logger.info("Adding event to catalog: *******************************************")
                 Logger.info(event)
             catalog.events.append(event)
-            stfilepath = os.path.join("detections_waveforms", det_start.strftime("%Y%m%d"))
+            stfilepath = os.path.join(OUTPUT_DIR_WF, det_start.strftime("%Y%m%d"))
             if not os.path.exists(stfilepath):
                 os.mkdir(stfilepath)
-            det_st_to_save.write(os.path.join(stfilepath, "bhdetect_%s.mseed" % det_start.strftime("%Y%m%d%H%M%S")), format="MSEED")
+            det_st_to_save.write(os.path.join(stfilepath, "bhdetect_%s.mseed" % det_start.strftime("%Y%m%d%H%M%S%f")), format="MSEED")
             
             continue
 
@@ -549,10 +550,10 @@ def main(st, fname, verbose=False):
             Logger.info("Adding event to catalog: *******************************************")
             Logger.info(event)
         catalog.events.append(event)
-        stfilepath = os.path.join("detections_waveforms", det_start.strftime("%Y%m%d"))
+        stfilepath = os.path.join(OUTPUT_DIR_WF, det_start.strftime("%Y%m%d"))
         if not os.path.exists(stfilepath):
             os.mkdir(stfilepath)
-            det_st_to_save.write(os.path.join(stfilepath, "bhdetect_%s.mseed" % det_start.strftime("%Y%m%d%H%M%S")), format="MSEED")
+            det_st_to_save.write(os.path.join(stfilepath, "bhdetect_%s.mseed" % det_start.strftime("%Y%m%d%H%M%S%f")), format="MSEED")
 
     if len(catalog) > 0:
         # Decluster
@@ -562,7 +563,7 @@ def main(st, fname, verbose=False):
         declustered_catalog.write(fname, format="QUAKEML")
         # catalog.write(fname, format="QUAKEML")
 
-
+        
 def decluster_bh(cat, trig_int=2.0):
     detect_info = []
     all_detections = []
@@ -588,66 +589,3 @@ def decluster_bh(cat, trig_int=2.0):
         declustered_catalog.append(all_detections[matches])
 
     return declustered_catalog
-
-
-if __name__ == "__main__":
-
-    datestr = sys.argv[1]
-    year = int(datestr[0:4])
-    month = int(datestr[4:6])
-    day = int(datestr[6:])
-
-    wf_dir = os.path.join(DATA_DIR_ROOT, datestr)
-    flist = glob(os.path.join(wf_dir, "*.sac"))
-    Logger.info("Number of files for this day = %d" % len(flist))
-    if len(flist) == 0:
-        sys.exit()
-    for hour in range(0, 24):
-
-        starttime = UTCDateTime(year, month, day, hour, 0, 0)
-        endtime = starttime + 3600
-        Logger.info("Processing hour %d: from %s to %s" % (hour, starttime, endtime))
-        daystr = "%d%02d%02d" % (year, month, day)
-        cat_fname = "detections/%s/bhdetections_%s_hour%02d.xml" % (daystr, daystr, hour)
-        # if os.path.exists(cat_fname):
-        #     Logger.warning("Hour is already processed, skipping.")
-        #     continue
-
-        # Read data
-        stream = read(os.path.join(wf_dir, "*.sac"), starttime=starttime, endtime=endtime)
-
-        # Check for bad data:
-        blacklist_stations = ["BH004", "BH005", "BH016"]
-        for tr in stream:
-            mmax = np.max(tr.data)
-            if np.isnan(mmax):
-                Logger.warning("Bad trace: %s" % tr)
-                stream.remove(tr)
-            elif tr.stats.station in blacklist_stations:
-                stream.remove(tr)
-
-        if len(stream) > 0:
-
-            stream.detrend("demean")
-            stream.detrend("linear")
-
-            # check that sampling rates do not vary
-            fs = stream[0].stats.sampling_rate
-            if len(stream) != len(stream.select(sampling_rate=fs)):
-                msg = "sampling rates of traces in stream are not equal"
-                raise ValueError(msg)
-
-            # Check data for gaps
-            if stream.get_gaps():
-                msg = 'Input stream must not include gaps:\n' + str(stream)
-                raise ValueError(msg)
-
-            # Run detector
-            main(stream, cat_fname, verbose=True)
-        else:
-            Logger.warning("No data for this hour")
-            continue
-
-    # Test window:
-    # starttime = UTCDateTime(2020, 3, 10, 6, 57, 40)
-    # endtime = starttime + 30
